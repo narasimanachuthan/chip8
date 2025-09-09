@@ -18,6 +18,7 @@ private:
 public:
     uint8_t key[16]{};
     uint8_t gfx[64 * 32]{};
+    bool drawFlag;
 
     Chip8();
     bool loadROM(const char* filepath);

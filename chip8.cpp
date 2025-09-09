@@ -32,6 +32,7 @@ void Chip8::initialize() {
     opcode = 0;
     I = 0;
     sp = 0;
+    drawFlag = false;
 
     for (uint8_t& i : gfx) {
         i = 0;
@@ -40,6 +41,7 @@ void Chip8::initialize() {
     for (int i=0; i<16; i++) {
         stack[i] = 0;
         V[i] = 0;
+        key[i] = 0;
     }
 
     for (uint8_t& i : memory) {
@@ -55,6 +57,7 @@ void Chip8::initialize() {
 }
 
 bool Chip8::loadROM(const char *filepath) {
+    initialize();
     FILE* fp = fopen(filepath, "rb");
     if (!fp) {
         perror("File opening failed.");
@@ -65,7 +68,7 @@ bool Chip8::loadROM(const char *filepath) {
     long fileSize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
-    uint8_t* buffer = (uint8_t*) malloc(fileSize);
+    char* buffer = (char*) malloc(fileSize);
     if (!buffer) {
         perror("Error creating buffer");
         fclose(fp);
@@ -81,7 +84,7 @@ bool Chip8::loadROM(const char *filepath) {
     }
 
     for (int i=0; i<bytesRead; i++) {
-        memory[i + 512] = buffer[i];
+        memory[i + 512] = (uint8_t) buffer[i];
     }
 
     free(buffer);
@@ -90,15 +93,16 @@ bool Chip8::loadROM(const char *filepath) {
 }
 
 void Chip8::emulateCycle() {
-    opcode = memory[pc] << 8 || memory[pc + 1];
-
+    opcode = memory[pc] << 8 | memory[pc + 1];
     switch (opcode & 0xF000) {
         case 0x0000:
             switch (opcode & 0x000F) {
                 case 0x0000:
                     //0x00E0 - Clear the display
-                    for (uint8_t& i : gfx)
+                    for (uint8_t& i : gfx) {
                         i = 0;
+                    }
+                    drawFlag = true;
                     pc += 2;
                     break;
 
@@ -111,19 +115,20 @@ void Chip8::emulateCycle() {
 
                 default:
                     printf("Unknown opcode: 0x%X\n", opcode);
+                    exit(EXIT_FAILURE);
             }
             break;
 
         case 0x1000:
             //0x1NNN - Jump to location NNN
-            pc = opcode & 0xFFF;
+            pc = opcode & 0x0FFF;
             break;
 
         case 0x2000:
             //0x2NNN - Call subroutine at NNN
             stack[sp] = pc;
             sp++;
-            pc = opcode & 0xFFF;
+            pc = opcode & 0x0FFF;
             break;
 
         case 0x3000:
@@ -237,6 +242,7 @@ void Chip8::emulateCycle() {
 
                 default:
                     printf("Unknown opcode: 0x%X\n", opcode);
+                    exit(EXIT_FAILURE);
             }
             break;
 
@@ -256,7 +262,7 @@ void Chip8::emulateCycle() {
 
         case 0xB000:
             //0xBNNN - Jump to location NNN + V0
-            pc = (opcode & 0xFFF) + V[0x0];
+            pc = (opcode & 0x0FFF) + V[0x0];
             break;
 
         case 0xC000:
@@ -285,13 +291,14 @@ void Chip8::emulateCycle() {
                 }
             }
 
+            drawFlag = true;
             pc += 2;
-            break;
         }
+            break;
 
         case 0xE000:
-            switch (opcode & 0x000F) {
-                case 0x000E:
+            switch (opcode & 0x00FF) {
+                case 0x009E:
                     //0xEX9E - Skip next instruction if key with the value of VX is pressed
                     if (key[V[(opcode & 0x0F00) >> 8]] != 0) {
                         pc += 2;
@@ -299,7 +306,7 @@ void Chip8::emulateCycle() {
                     pc += 2;
                     break;
 
-                case 0x0001:
+                case 0x00A1:
                     //0xEXA1 - Skip next instruction if key with value of VX is not pressed
                     if (key[V[(opcode & 0x0F00) >> 8]] == 0) {
                         pc += 2;
@@ -309,6 +316,7 @@ void Chip8::emulateCycle() {
 
                 default:
                     printf("Unknown opcode: 0x%X\n", opcode);
+                    exit(EXIT_FAILURE);
             }
             break;
 
@@ -323,17 +331,18 @@ void Chip8::emulateCycle() {
                 case 0x000A: {
                     //0xFX0A - Wait for key press and store the value in VX
                     bool keyPressed = false;
-                    while (!keyPressed) {
-                        for (int i = 0; i < 16; i++) {
-                            if (key[i] != 0) {
-                                V[(opcode & 0x0F00) >> 8] = i;
-                                keyPressed = true;
-                            }
+                    for (int i = 0; i < 16; i++) {
+                        if (key[i] != 0) {
+                            V[(opcode & 0x0F00) >> 8] = i;
+                            keyPressed = true;
                         }
                     }
+                    if (!keyPressed) {
+                        return;
+                    }
                     pc += 2;
-                    break;
                 }
+                    break;
 
                 case 0x0015:
                     //0xFX15 - Set delay timer to VX
@@ -392,11 +401,13 @@ void Chip8::emulateCycle() {
 
                 default:
                     printf("Unknown opcode: 0x%X\n", opcode);
+                    exit(EXIT_FAILURE);
             }
             break;
 
         default:
             printf("Unknown opcode: 0x%X\n", opcode);
+            exit(EXIT_FAILURE);
     }
 
     if (delayTimer > 0) {
